@@ -1,0 +1,7 @@
+
+{
+  "appId": "com.supergoo.customer",
+  "appName": "Supergoo Customer",
+  "webDir": ".",
+  "bundledWebRuntime": false
+}
