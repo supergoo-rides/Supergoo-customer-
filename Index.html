@@ -1,0 +1,136 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1769ff">
+<title>Supergoo Customer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f3f6fc;color:#17233b}
+header{background:#1769ff;color:white;padding:20px;border-radius:0 0 22px 22px}
+header h1{margin:0;font-size:27px}
+header p{margin:7px 0 0}
+main{padding:15px;max-width:650px;margin:auto}
+.card{background:white;padding:16px;border-radius:17px;margin-bottom:15px;box-shadow:0 3px 15px #10204010}
+label{font-size:13px;font-weight:bold;display:block;margin:12px 0 6px}
+input{width:100%;padding:13px;border:1px solid #d7deea;border-radius:10px;font-size:16px}
+button{border:0;border-radius:11px;padding:13px;font-weight:bold;font-size:15px;cursor:pointer}
+.primary{background:#1769ff;color:white;width:100%;margin-top:12px}
+.ride-options{display:flex;gap:10px}
+.ride{background:white;border:2px solid #dbe3f2;flex:1;padding:14px 5px}
+.ride.selected{border-color:#1769ff;background:#edf4ff}
+.small{color:#65728a;font-size:13px}
+#map{height:270px;border-radius:13px;margin-top:12px}
+#status{font-size:14px;white-space:pre-wrap}
+.price{font-size:22px;font-weight:bold;color:#1769ff}
+</style>
+</head>
+<body>
+<header>
+<h1>Supergoo</h1>
+<p>Your ride, your safety.</p>
+</header>
+<main>
+<section class="card">
+<h3>Where do you want to go?</h3>
+<label for="pickup">Pickup location</label>
+<input id="pickup" placeholder="e.g. Mandapeta, Andhra Pradesh">
+<label for="drop">Drop location</label>
+<input id="drop" placeholder="e.g. Ravulapalem, Andhra Pradesh">
+<button id="routeBtn" class="primary">Find Route &amp; Fare</button>
+<p class="small">Enter a place name with its town or district for better results.</p>
+</section>
+<section class="card">
+<h3>Select your ride</h3>
+<div class="ride-options">
+<button class="ride selected" data-type="Bike">🏍️ Bike<br><span>₹12/km</span></button>
+<button class="ride" data-type="Auto">🛺 Auto<br><span>₹20/km</span></button>
+</div>
+<p>Road distance: <strong id="distance">--</strong></p>
+<p>Estimated fare: <span class="price" id="fare">--</span></p>
+<p class="small">Fare is an estimate based on the road route. Final fare may vary.</p>
+<button id="bookBtn" class="primary">Book Ride</button>
+<p id="status" role="status"></p>
+</section>
+<section class="card">
+<h3>Route map</h3>
+<div id="map"></div>
+</section>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let rideType = "Bike";
+let routeKm = null;
+let routeLayer = null;
+let pickupPoint = null;
+let dropPoint = null;
+const map = L.map("map").setView([16.8,82.0],9);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+maxZoom:19,
+attribution:"&copy; OpenStreetMap contributors"
+}).addTo(map);
+document.querySelectorAll(".ride").forEach(button=>{
+button.addEventListener("click",()=>{
+document.querySelectorAll(".ride").forEach(b=>b.classList.remove("selected"));
+button.classList.add("selected");
+rideType=button.dataset.type;
+updateFare();
+});
+});
+function updateFare(){
+if(routeKm===null){$("fare").textContent="--";return;}
+const rate=rideType==="Bike"?12:20;
+$("fare").textContent="₹"+Math.round(routeKm*rate);
+}
+async function findPlace(query){
+const url="https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
++encodeURIComponent(query+", Andhra Pradesh, India");
+const response=await fetch(url);
+if(!response.ok)throw new Error("Place search service is unavailable.");
+const results=await response.json();
+if(!results.length)throw new Error("Place not found: "+query);
+return [Number(results[0].lon),Number(results[0].lat)];
+}
+$("routeBtn").addEventListener("click",async()=>{
+const pickup=$("pickup").value.trim();
+const drop=$("drop").value.trim();
+if(!pickup||!drop){$("status").textContent="Enter both pickup and drop locations.";return;}
+$("routeBtn").disabled=true;
+$("status").textContent="Searching places and road route...";
+try{
+pickupPoint=await findPlace(pickup);
+dropPoint=await findPlace(drop);
+const url="https://router.project-osrm.org/route/v1/driving/"
++pickupPoint.join(",")+";"+dropPoint.join(",")+"?overview=full&geometries=geojson";
+const response=await fetch(url);
+if(!response.ok)throw new Error("Route service is unavailable.");
+const data=await response.json();
+if(data.code!=="Ok"||!data.routes.length)throw new Error("No road route found.");
+const route=data.routes[0];
+routeKm=route.distance/1000;
+if(routeLayer)map.removeLayer(routeLayer);
+routeLayer=L.geoJSON(route.geometry,{style:{color:"#1769ff",weight:5}}).addTo(map);
+map.fitBounds(routeLayer.getBounds(),{padding:[20,20]});
+L.marker([pickupPoint[1],pickupPoint[0]]).addTo(map).bindPopup("Pickup: "+pickup);
+L.marker([dropPoint[1],dropPoint[0]]).addTo(map).bindPopup("Drop: "+drop);
+$("distance").textContent=routeKm.toFixed(1)+" km";
+updateFare();
+$("status").textContent="Route found. Review distance and estimated fare.";
+}catch(error){
+routeKm=null;
+$("distance").textContent="--";
+$("fare").textContent="--";
+$("status").textContent=error.message;
+}finally{$("routeBtn").disabled=false;}
+});
+$("bookBtn").addEventListener("click",()=>{
+if(routeKm===null){$("status").textContent="First find a valid route.";return;}
+$("status").textContent="Real ride booking is not connected yet. Firebase and the Captain app must be connected first.";
+});
+</script>
+</body>
+</html>
